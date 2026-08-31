@@ -1,0 +1,91 @@
+name: Convertir DXVK/VKD3D/WOWBox64/FEXCore/Wine (.wcp -> .rat)
+
+# Complementa build-all-manual.yml: DXVK, VKD3D, WOWBox64 (via .wcp externo),
+# FEXCore (via .wcp externo) y los prefixPack de Wine/Proton NO se compilan
+# con build-all.sh (confirmado en la auditoria 2026-08-30,
+# docs/investigacion/auditoria-completa-2026-08-30-dxvk-vkd3d-wined3d.md) --
+# se consumen ya compilados como .wcp/.tzst oficiales (ej. The412Banner/Nightlies)
+# y se convierten a .rat con tools/wcp-tzst-to-rat.sh (ver ese script para el
+# detalle exacto de cada modo soportado).
+#
+# Este workflow NO adivina URLs de releases -- el input "wcp_url" es
+# obligatorio y lo da quien dispara el workflow a mano (ej. copiando el link
+# del asset .wcp/.tzst desde la pagina de releases de Nightlies que
+# corresponda). No hay URL de release fijada en este archivo porque el asset
+# real cambia de nombre entre corridas (nightly) y no esta confirmado un
+# patron estable de URL "latest" para todos los modos.
+
+on:
+  workflow_dispatch:
+    inputs:
+      wcp_url:
+        description: "URL directa al .wcp/.tzst de origen (ej. asset de un release de The412Banner/Nightlies)"
+        required: true
+        type: string
+      modo:
+        description: "Modo de conversion (ver tools/wcp-tzst-to-rat.sh)"
+        required: true
+        type: choice
+        options:
+          - dxvk
+          - vkd3d
+          - wowbox64
+          - fexcore
+          - wine-prefixpack
+          - vulkan-driver
+      pretty_name:
+        description: 'Nombre bonito del paquete (ej. "DXVK Sarek")'
+        required: true
+        type: string
+      version:
+        description: 'Version (para modo wine-prefixpack DEBE incluir el sufijo "arm64ec" si corresponde)'
+        required: true
+        type: string
+      arch:
+        description: "Arquitectura"
+        required: true
+        type: choice
+        options:
+          - aarch64
+          - x86_64
+      vk_driver_lib:
+        description: "Solo modo vulkan-driver: nombre del .so principal (ej. libvulkan_wrapper.so)"
+        required: false
+        type: string
+
+jobs:
+  convert:
+    name: wcp-tzst-to-rat (${{ inputs.modo }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar dependencias (python3, zstd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 zstd xz-utils
+
+      - name: Descargar .wcp/.tzst de origen
+        run: |
+          mkdir -p /tmp/wcp-in
+          curl -fL --retry 3 -o /tmp/wcp-in/input.pkg "${{ inputs.wcp_url }}"
+
+      - name: Convertir a .rat
+        run: |
+          chmod +x tools/wcp-tzst-to-rat.sh
+          mkdir -p built-pkgs
+          ./tools/wcp-tzst-to-rat.sh \
+            /tmp/wcp-in/input.pkg \
+            "${{ inputs.modo }}" \
+            "${{ inputs.pretty_name }}" \
+            "${{ inputs.version }}" \
+            "${{ inputs.arch }}" \
+            built-pkgs \
+            "${{ inputs.vk_driver_lib }}"
+
+      - name: Subir .rat resultante como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: micewine-packages-convertido-${{ inputs.modo }}-${{ inputs.arch }}
+          path: built-pkgs/*.rat
+          if-no-files-found: error

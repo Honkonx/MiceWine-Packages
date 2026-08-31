@@ -1,0 +1,24 @@
+diff -uNr mesa-26.0.0/meson.build mesa-26.0.0-mod/meson.build
+--- mesa-26.0.0/meson.build	2026-02-11 18:07:29.000000000 +0000
++++ mesa-26.0.0-mod/meson.build	2026-04-09 17:54:21.048989721 +0000
+@@ -1462,7 +1462,7 @@
+   endif
+ endif
+ 
+-foreach h : ['xlocale.h', 'linux/futex.h', 'endian.h', 'dlfcn.h', 'sys/shm.h',
++foreach h : ['linux/futex.h', 'endian.h', 'dlfcn.h', 'sys/shm.h',
+              'cet.h', 'pthread_np.h', 'poll.h', 'sys/inotify.h',
+              'linux/udmabuf.h']
+   if cc.check_header(h)
+@@ -1473,11 +1473,9 @@
+ functions_to_detect = {
+   'strtof': '',
+   'mkostemp': '',
+-  'memfd_create': '#include <sys/mman.h>',
+   'random_r': '',
+   'flock': '',
+   'strtok_r': '',
+-  'getrandom': '#include <sys/random.h>',
+   'qsort_s': '',
+   'posix_fallocate': '',
+   'secure_getenv': '',

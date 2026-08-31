@@ -19,6 +19,27 @@ setupBuildEnv()
 		echo ""
 	fi
 
+	# Bug real encontrado 2026-08-26 (build aarch64 real, "ld.lld: error: unable to find library
+	# -lpthread" al compilar libX11 -- Y CUALQUIER otro paquete que pida -lpthread/-lrt
+	# explicitamente): el NDK moderno (r23+) fusiono libpthread/librt DENTRO de libc, sin dejar
+	# libpthread.a/librt.a como stubs de compatibilidad -- paquetes autotools viejos (libX11,
+	# probablemente varios mas en la cola) siguen pidiendolos por nombre y el linkeo falla en
+	# seco. Fix real y estandar (usado por muchos proyectos NDK): crear archivos .a VACIOS con ese
+	# nombre en el sysroot -- satisfacen el -lpthread/-lrt del linker como no-ops, ya que la
+	# funcionalidad real ya esta en libc. Se hace para AMBAS arquitecturas (x86_64/aarch64) del
+	# sysroot de este mismo NDK, aunque $ARCH sea una sola en esta invocacion -- barato, sin
+	# efecto secundario real si el sysroot de la otra arch no lo necesita.
+	for sysroot_arch in x86_64-linux-android aarch64-linux-android; do
+		libdir="$INIT_DIR/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/$sysroot_arch"
+		if [ -d "$libdir" ]; then
+			for stublib in libpthread librt; do
+				if [ ! -f "$libdir/$stublib.a" ]; then
+					"$INIT_DIR/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" rcs "$libdir/$stublib.a"
+				fi
+			done
+		fi
+	done
+
 	if [ ! -d "$INIT_DIR/cache/mingw" ]; then
 		echo "Downloading MinGW..."
 		curl --output "cache/$MINGW_FILENAME" -#L "$MINGW_URL"
@@ -36,7 +57,37 @@ setupBuildEnv()
 		echo ""
 	fi
 
-	export PATH=$INIT_PATH:$INIT_DIR/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$INIT_DIR/cache/mingw/bin
+	# Bug real encontrado 2026-08-26 (build aarch64 real, paquete wine-10.1-arm64ec-firetest,
+	# 69/89): "configure: error: arm64ec PE cross-compiler not found" -- el MinGW cacheado de
+	# arriba (Red-Rose MinGW-w64, GCC 11.5.0) NO puede compilar arm64ec/aarch64-Windows PE en
+	# absoluto: ARM64EC es una ABI exclusiva de LLVM/clang (interoperabilidad ARM64/x64 de
+	# Microsoft), GCC nunca la implemento. Se agrega llvm-mingw (mstorsjo/llvm-mingw, MIT, release
+	# con soporte arm64ec-windows desde nov-2023) SOLO como fuente adicional de los binarios
+	# aarch64-w64-mingw32-*/arm64ec-w64-mingw32-* que el GCC-mingw no provee -- confirmado con
+	# `ls cache/mingw/bin | grep -E "aarch64-w64-mingw32|arm64ec"` vacio, sin overlap de nombres.
+	# Se antepone DESPUES de cache/mingw/bin en el PATH (no antes): para los targets que el
+	# GCC-mingw ya compila bien hoy (x86_64-w64-mingw32-*, i686-w64-mingw32-*, usados por
+	# wine-10.10/wine-9.20/proton-wine-10.0 x86_64, todos ya funcionando) sigue ganando el mismo
+	# binario de siempre, sin cambio de comportamiento -- llvm-mingw solo aporta los nombres que
+	# antes no existian en ningun lado del PATH.
+	if [ ! -d "$INIT_DIR/cache/llvm-mingw" ]; then
+		echo "Downloading llvm-mingw (soporte arm64ec-windows)..."
+		curl --output "cache/$LLVM_MINGW_FILENAME" -#L "$LLVM_MINGW_URL"
+		echo "Checking SHA512..."
+		SHA512=$(sha512sum "cache/$LLVM_MINGW_FILENAME" | cut -d ' ' -f 1)
+		if [ "$SHA512" != "$LLVM_MINGW_SHA512" ]; then
+			echo "Error on Checking SHA512 for llvm-mingw... Aborting"
+			rm -f "cache/$LLVM_MINGW_FILENAME"
+			exit 1
+		fi
+		echo "Unpacking llvm-mingw..."
+		tar -xf "cache/$LLVM_MINGW_FILENAME" -C "cache"
+		mv "cache/$(tar -tf "cache/$LLVM_MINGW_FILENAME" | cut -d "/" -f 1 | head -n 1)" "cache/llvm-mingw"
+		rm -f "cache/$LLVM_MINGW_FILENAME"
+		echo ""
+	fi
+
+	export PATH=$INIT_PATH:$INIT_DIR/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$INIT_DIR/cache/mingw/bin:$INIT_DIR/cache/llvm-mingw/bin
 	export ANDROID_SDK="$1"
 	export CC=$ARCH-linux-android$ANDROID_SDK-clang
 	export CXX=$CC++
@@ -45,6 +96,13 @@ setupBuildEnv()
 	export PKG_CONFIG_PATH="$PREFIX/share/pkgconfig:$PREFIX/lib/pkgconfig"
 	export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 	export PKG_CONFIG="/usr/bin/pkg-config"
+	# Bug real corregido 2026-08-30: xorg-macros.m4 (paquete xorg-utils-macros)
+	# se instala bien dentro de $PREFIX/share/aclocal, pero aclocal/autoreconf
+	# del host nunca lo buscan ahi por defecto -- cualquier paquete autotools
+	# que necesite XORG_MACROS_VERSION (xtrans, libX11, libXi, etc.) fallaba
+	# con "must install xorg-macros 1.12 or later before running
+	# autoconf/autogen". Confirmado leyendo el log real de xtrans.
+	export ACLOCAL_PATH="$PREFIX/share/aclocal"
 }
 
 applyPatches()
@@ -345,6 +403,23 @@ setupPackages()
 			fi
 		done
 
+		# Bug real encontrado 2026-08-30: si un DEPENDENCIES de algun paquete
+		# nombra algo que no es una carpeta real en packages/ (ej. un paquete
+		# gstreamer/gst-plugins-* que nunca se llego a crear), ese nombre nunca
+		# entra a FILTERED_PACKAGES (nunca se procesa como $package en este
+		# mismo loop), asi que el paquete que depende de el queda atrapado en
+		# NEW_TODO para siempre -- el "while [ -n $TODO_PACKAGES ]" de arriba
+		# queda girando indefinidamente, sin ningun log ni error visible (esto
+		# paso con proton-wine-10.0/wine-10.10/wine-9.20/etc., mas de 40
+		# minutos sin avanzar). Si esta pasada no redujo TODO_PACKAGES para
+		# nada, es una dependencia irresoluble real, no progreso pendiente --
+		# fallar ruidosamente en vez de colgarse en silencio.
+		if [ "$NEW_TODO" == "$TODO_PACKAGES" ] && [ -n "$NEW_TODO" ]; then
+			echo "E: No se puede resolver la(s) dependencia(s) de: $NEW_TODO"
+			echo "E: Revisar el DEPENDENCIES de esos paquetes -- alguno nombra algo que no existe como carpeta real en packages/."
+			exit 1
+		fi
+
 		TODO_PACKAGES="$NEW_TODO"
 	done
 
@@ -471,12 +546,12 @@ compileAll()
 			exit 0
 		fi
 
-		if [ ! -d "$packageDestDirPkg/data/data/com.micewine.emu" ]; then
+		if [ ! -d "$packageDestDirPkg$APP_ROOT_DIR" ]; then
 			echo "- [$packageNum/$packageCount] Package: '"$package"' failed to compile. Check logs"
 			exit 0
 		fi
 
-		cp -rf "$packageDestDirPkg/data/data/com.micewine.emu/"* "/data/data/com.micewine.emu"
+		cp -rf "$packageDestDirPkg$APP_ROOT_DIR/"* "$APP_ROOT_DIR"
 
 		find "$packageDestDirPkg" -type f > "$INIT_DIR/logs/$package-package-files.txt"
 
@@ -541,7 +616,14 @@ export NDK_FILENAME="${NDK_URL##*/}"
 export NDK_SHA512="233e0b34c946a1ba60022809536307613ed956a4d596b3f43dc75e752b9d973f7c07f03a404a72a893629b86d8046664b9020920b3a6c64f68e223c5da109ec5"
 export MINGW_URL="http://techer.pascal.free.fr/Red-Rose_MinGW-w64-Toolchain/Red-Rose-MinGW-w64-Posix-Urct-v12.0.0.r458.g03d8a40f5-Gcc-11.5.0.tar.xz"
 export MINGW_FILENAME="${MINGW_URL##*/}"
-export MINGW_SHA512="c92e8d4c5811ad82d457a5618f902c2f7e951aa4e3e1cbd640be243ac4d1810e26ea7a933cb2b4b28cda715c04a7f6453060e1b13dd6bf953b69e6ea5ec75c93"
+export MINGW_SHA512="8d091894ebd4b51c8c9d0c1f419e5635fa7622e61e299510da918a292c49d5d58519a7dd8875e7e9ce3a553a837440ed0545a4116ef4826fc15ed8810580ca4c"
+
+# mstorsjo/llvm-mingw (MIT) -- unico toolchain usado (ver setupBuildEnv()) que soporta el
+# target arm64ec-windows, necesario para wine-10.1-arm64ec-firetest y
+# wine-arm64ec-andrerh-hangover. Release fijado 20260616 (ucrt, linux x86_64).
+export LLVM_MINGW_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz"
+export LLVM_MINGW_FILENAME="${LLVM_MINGW_URL##*/}"
+export LLVM_MINGW_SHA512="3eb4a0ae7a40048b28df0177da0d9b61a5a0cff287bf17986d9ce4b9cfb2f119b9367f9495f2b5ab7efd10fa66ac10c917a8b87df62b49935fef1b5642e00c3c"
 
 export PACKAGES="$(ls packages)"
 export INIT_DIR="$PWD"

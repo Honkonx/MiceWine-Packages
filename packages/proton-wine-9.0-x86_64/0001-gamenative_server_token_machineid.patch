@@ -1,0 +1,56 @@
+# Puerto directo de packages/proton-wine-10.0/patches/0038-gamenative_server_token_machineid.patch
+# (mismo contenido, sin cambios de contexto ni de linea -- aplica limpio tal
+# cual). Confirmado 2026-08-30 vs docs/investigacion/wine-proton9-pipetto-plan.md
+# seccion 3.b: es el UNICO patch de esa lista sin equivalente en los commits
+# propios de Pipetto (verificado con `grep -n "machine-id\|ANDROID__"
+# server/token.c` sobre referencia/personas/pipetto-crypto-2026-08-30/
+# wine-proton9-x86_64, HEAD 5836d17499f1d32d9a66a4a3ae5de0be0c266279 -- solo
+# aparece el fopen("/etc/machine-id") original, sin ningun fallback Android).
+# Dry-run real con `git apply --check` sobre ese arbol clonado: aplica limpio
+# (exit 0), sin tocar nada mas.
+#
+# Motivo del fix: /etc/machine-id no existe en Android (no hay systemd/dbus
+# que lo genere), asi que sin este fallback init_user_sid() falla el fopen y
+# hace return temprano dejando el SID de maquina sin inicializar -- mismo tipo
+# de bug silencioso que otros gaps de Android ya documentados en este
+# proyecto. El fallback usa $WINEPREFIX/.machine-id, generado una sola vez a
+# partir del uid del proceso, y persistido para que el SID de maquina sea
+# estable entre reinicios del mismo prefix.
+diff --git a/server/token.c b/server/token.c
+index 31fc4b8..48c15ce 100644
+--- a/server/token.c
++++ b/server/token.c
+@@ -221,12 +221,33 @@ void init_user_sid(void)
+     size_t n;
+     FILE *f;
+
++#ifdef __ANDROID__
++    /* /etc/machine-id is absent on Android.  Fall back to a per-prefix
++     * file so the machine SID stays stable across reboots/restarts. */
++    const char *prefix = getenv("WINEPREFIX");
++    if (prefix)
++    {
++        char path[4096];
++        snprintf(path, sizeof(path), "%s/.machine-id", prefix);
++        f = fopen(path, "r");
++        if (!f) {
++            /* First run: seed from uid and persist for next time. */
++            FILE *wf = fopen(path, "w");
++            if (wf) {
++                fprintf(wf, "%08x%08x\n", 0x414e4452u, (unsigned int) getuid());
++                fclose(wf);
++                f = fopen(path, "r");
++            }
++        }
++    }
++#else
+     f = fopen( "/etc/machine-id", "r" );
+     if (!f)
+     {
+         fprintf( stderr, "Failed to open /etc/machine-id, error %s.\n", strerror( errno ));
+         return;
+     }
++#endif
+
+     n = fread( machine_id, sizeof(*machine_id), 16, f );
+     fclose(f);

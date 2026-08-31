@@ -1,4 +1,8 @@
 [binaries]
+c = '/home/honkon/mw-build/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang'
+cpp = '/home/honkon/mw-build/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++'
+ar = '/home/honkon/mw-build/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
+strip = '/home/honkon/mw-build/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'
 pkg-config = '/usr/bin/pkg-config'
 cmake = '/usr/bin/cmake'
 
@@ -10,4 +14,4 @@ endian = 'little'
 
 [properties]
 skip_sanity_check = true
-
+needs_exe_wrapper = true

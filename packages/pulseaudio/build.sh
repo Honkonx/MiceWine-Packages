@@ -5,4 +5,9 @@ MESON_ARGS="-Dalsa=disabled -Dx11=disabled -Dgtk=disabled -Dopenssl=disabled -Dg
 CFLAGS="-I$PREFIX/include"
 CPPFLAGS="-I$PREFIX/include"
 LDFLAGS="-L$PREFIX/lib -Wl,--undefined-version"
-DEPENDENCIES="libtool libsndfile"
+# glib agregado 2026-08-30 (gap real encontrado en auditoria de grafo de dependencias):
+# pulseaudio SI necesita glib de verdad para sus modulos (libgio-2.0.so/libglib-2.0.so
+# se linkean directo, confirmado en el log real de build), pero no estaba declarado --
+# sin esto, el orden topologico de build-all.sh no garantiza que glib ya este compilado
+# antes de intentar pulseaudio.
+DEPENDENCIES="libtool libsndfile glib"

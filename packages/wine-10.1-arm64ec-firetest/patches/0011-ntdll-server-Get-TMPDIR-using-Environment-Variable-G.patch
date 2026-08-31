@@ -1,0 +1,174 @@
+From 68daea43962992b6f09f4771dd815f9974505923 Mon Sep 17 00:00:00 2001
+From: KreitinnSoftware <pablolabs36@gmail.com>
+Date: Sun, 9 Mar 2025 21:01:35 -0300
+Subject: [PATCH 11/18] ntdll, server: Get TMPDIR using Environment Variable,
+ Get Default Disk Z Path from WINE_Z_DISK Environment Variable
+
+---
+ dlls/ntdll/unix/esync.c  | 34 ++++++++++++++++++++++++----------
+ dlls/ntdll/unix/server.c | 16 +++++++++++++++-
+ server/esync.c           | 34 ++++++++++++++++++++++++----------
+ 3 files changed, 63 insertions(+), 21 deletions(-)
+
+diff --git a/dlls/ntdll/unix/esync.c b/dlls/ntdll/unix/esync.c
+index bcd9cf6b628..e0c85529b0c 100644
+--- a/dlls/ntdll/unix/esync.c
++++ b/dlls/ntdll/unix/esync.c
+@@ -112,7 +112,17 @@ static pthread_mutex_t shm_addrs_mutex = PTHREAD_MUTEX_INITIALIZER;
+ #include <errno.h>
+ static int shm_unlink(const char *name) {
+     size_t namelen;
+-    char *fname;
++    const char *env_tmpdir = getenv("TMPDIR");
++    const char *default_tmpdir = "/data/data/com.micewine.emu/files/usr/tmp/";
++
++    char fname[1024];
++
++    if (env_tmpdir) {
++        size_t pathlen = strlen(env_tmpdir);
++        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
++    } else {
++        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
++    }
+ 
+     /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+@@ -123,18 +133,25 @@ static int shm_unlink(const char *name) {
+         return -1;
+     }
+ 
+-    namelen = strlen(name);
+-    fname = (char *) alloca(sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1 + namelen + 1);
+-    memcpy(fname, "/data/data/com.micewine.emu/files/usr/tmp/", sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1);
+-    memcpy(fname + sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1, name, namelen + 1);
++    strcat(fname, name);
+ 
+     return unlink(fname);
+ }
+ 
+ static int shm_open(const char *name, int oflag, mode_t mode) {
+     size_t namelen;
+-    char *fname;
+     int fd;
++    const char *env_tmpdir = getenv("TMPDIR");
++    const char *default_tmpdir = "/data/data/com.micewine.emu/files/usr/tmp/";
++
++    char fname[1024];
++
++    if (env_tmpdir) {
++        size_t pathlen = strlen(env_tmpdir);
++        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
++    } else {
++        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
++    }
+ 
+     /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+@@ -145,10 +162,7 @@ static int shm_open(const char *name, int oflag, mode_t mode) {
+         return -1;
+     }
+ 
+-    namelen = strlen(name);
+-    fname = (char *) alloca(sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1 + namelen + 1);
+-    memcpy(fname, "/data/data/com.micewine.emu/files/usr/tmp/", sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1);
+-    memcpy(fname + sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1, name, namelen + 1);
++    strcat(fname, name);
+ 
+     fd = open(fname, oflag, mode);
+     if (fd != -1) {
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index e79269ecb3d..8ff8b8bccd0 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1301,7 +1301,21 @@ static int setup_config_dir(void)
+         symlink( "../drive_c", "dosdevices/c:" );
+ #ifdef __ANDROID__
+         symlink( "/storage/emulated/0", "dosdevices/d:" );
+-        symlink( "/data/data/com.micewine.emu/files", "dosdevices/z:" );
++
++        const char *env_wine_z_disk_folder = getenv("WINE_Z_DISK");
++        const char *default_wine_z_disk_folder = "/data/data/com.micewine.emu/files/";
++
++        char wine_z_disk_folder[1024];
++
++        if (env_wine_z_disk_folder) {
++            size_t pathlen = strlen(env_wine_z_disk_folder);
++            snprintf(wine_z_disk_folder, sizeof(wine_z_disk_folder), "%s%s", env_wine_z_disk_folder,
++                     (env_wine_z_disk_folder[pathlen - 1] == '/') ? "" : "/");
++        } else {
++            snprintf(wine_z_disk_folder, sizeof(wine_z_disk_folder), "%s", default_wine_z_disk_folder);
++        }
++
++        symlink( env_wine_z_disk_folder, "dosdevices/z:" );
+ #else
+         symlink( "/", "dosdevices/z:" );
+ #endif
+diff --git a/server/esync.c b/server/esync.c
+index 734dd84fb58..df3bbe66b30 100644
+--- a/server/esync.c
++++ b/server/esync.c
+@@ -69,7 +69,17 @@ static long pagesize;
+ #include <errno.h>
+ static int shm_unlink(const char *name) {
+     size_t namelen;
+-    char *fname;
++    const char *env_tmpdir = getenv("TMPDIR");
++    const char *default_tmpdir = "/data/data/com.micewine.emu/files/usr/tmp/";
++
++    char fname[1024];
++
++    if (env_tmpdir) {
++        size_t pathlen = strlen(env_tmpdir);
++        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
++    } else {
++        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
++    }
+ 
+     /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+@@ -80,18 +90,25 @@ static int shm_unlink(const char *name) {
+         return -1;
+     }
+ 
+-    namelen = strlen(name);
+-    fname = (char *) alloca(sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1 + namelen + 1);
+-    memcpy(fname, "/data/data/com.micewine.emu/files/usr/tmp/", sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1);
+-    memcpy(fname + sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1, name, namelen + 1);
++    strcat(fname, name);
+ 
+     return unlink(fname);
+ }
+ 
+ static int shm_open(const char *name, int oflag, mode_t mode) {
+     size_t namelen;
+-    char *fname;
+     int fd;
++    const char *env_tmpdir = getenv("TMPDIR");
++    const char *default_tmpdir = "/data/data/com.micewine.emu/files/usr/tmp/";
++
++    char fname[1024];
++
++    if (env_tmpdir) {
++        size_t pathlen = strlen(env_tmpdir);
++        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
++    } else {
++        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
++    }
+ 
+     /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+@@ -102,10 +119,7 @@ static int shm_open(const char *name, int oflag, mode_t mode) {
+         return -1;
+     }
+ 
+-    namelen = strlen(name);
+-    fname = (char *) alloca(sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1 + namelen + 1);
+-    memcpy(fname, "/data/data/com.micewine.emu/files/usr/tmp/", sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1);
+-    memcpy(fname + sizeof("/data/data/com.micewine.emu/files/usr/tmp/") - 1, name, namelen + 1);
++    strcat(fname, name);
+ 
+     fd = open(fname, oflag, mode);
+     if (fd != -1) {
+-- 
+2.55.0.windows.3
+

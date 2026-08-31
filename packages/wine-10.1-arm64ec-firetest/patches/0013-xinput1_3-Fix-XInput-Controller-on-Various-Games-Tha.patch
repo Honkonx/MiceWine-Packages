@@ -1,0 +1,58 @@
+From 7e93e231f5b27f59f06bd9fbd72705ea7ddccd1a Mon Sep 17 00:00:00 2001
+From: KreitinnSoftware <pablolabs36@gmail.com>
+Date: Fri, 28 Mar 2025 21:33:48 -0300
+Subject: [PATCH 13/18] xinput1_3: Fix XInput Controller on Various Games That
+ Breaked on Last Commit
+
+---
+ dlls/xinput1_3/main.c | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/xinput1_3/main.c b/dlls/xinput1_3/main.c
+index 333d64d1194..ba222c5e62d 100644
+--- a/dlls/xinput1_3/main.c
++++ b/dlls/xinput1_3/main.c
+@@ -352,28 +352,36 @@ static DWORD WINAPI gamepad_update_thread_proc(void *param)
+                 memcpy(controller3, buffer + 32 * 3, 32);
+ 
+                 if (controller0[1]) {
+-                    controller_connect(&controllers[0]);
++                    if (!controllers[0].connected) {
++                        controller_connect(&controllers[0]);
++                    }
+                     read_controller_state(&controllers[0], controller0);
+                 } else {
+                     controller_disconnect(&controllers[0]);
+                 }
+ 
+                 if (controller1[1]) {
+-                    controller_connect(&controllers[1]);
++                    if (!controllers[1].connected) {
++                        controller_connect(&controllers[1]);
++                    }
+                     read_controller_state(&controllers[1], controller1);
+                 } else {
+                     controller_disconnect(&controllers[1]);
+                 }
+ 
+                 if (controller2[1]) {
+-                    controller_connect(&controllers[2]);
++                    if (!controllers[2].connected) {
++                        controller_connect(&controllers[2]);
++                    }
+                     read_controller_state(&controllers[2], controller2);
+                 } else {
+                     controller_disconnect(&controllers[2]);
+                 }
+ 
+                 if (controller3[1]) {
+-                    controller_connect(&controllers[3]);
++                    if (!controllers[3].connected) {
++                        controller_connect(&controllers[3]);
++                    }
+                     read_controller_state(&controllers[3], controller3);
+                 } else {
+                     controller_disconnect(&controllers[3]);
+-- 
+2.55.0.windows.3
+

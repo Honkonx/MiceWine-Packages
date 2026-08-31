@@ -22,7 +22,7 @@ CONFIGURE_ARGS="--enable-archs=i386,x86_64 \
 				--x-libraries=$PREFIX/lib \
 				--x-includes=$PREFIX/include \
 				--with-pulse \
-				--with-gstreamer \
+				--without-gstreamer \
 				--with-opengl \
 				--with-gnutls \
 				--with-mingw=gcc \
@@ -47,4 +47,6 @@ CONFIGURE_ARGS="--enable-archs=i386,x86_64 \
 				--without-udev \
 				--without-capi"
 
-DEPENDENCIES="libX11 libXext libXcomposite libXrender libXcursor libXrandr libXxf86vm libXinerama libXfixes libXi Vulkan-Headers Vulkan-Loader libglvnd pulseaudio freetype libgnutls gstreamer gst-plugins-base gst-plugins-ugly gst-plugins-good gst-plugins-bad"
+# gstreamer/gst-plugins-* removidos 2026-08-30: causaban loop infinito real
+# en build-all.sh (ver wine-9.20-aarch64 y docs/build/fix-freedesktop-org-caido-migracion-gitlab.md)
+DEPENDENCIES="libX11 libXext libXcomposite libXrender libXcursor libXrandr libXxf86vm libXinerama libXfixes libXi Vulkan-Headers Vulkan-Loader libglvnd pulseaudio freetype libgnutls"

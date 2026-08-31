@@ -1,0 +1,29 @@
+commit fc09a1e235ad7d643f2d1608f365c46141c2adeb
+Author: pipetto-crypto <pipetto-crypto@gmail.com>
+Date:   Mon Jun 2 16:29:18 2025 +0200
+
+    virtual: disable kernel writewatches on Android
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 6d99371837f..b6bb87b7c07 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -398,6 +398,7 @@ static void kernel_writewatch_softdirty_init(void)
+ 
+ static void kernel_writewatch_init(void)
+ {
++#ifndef __ANDROID__
+     struct uffdio_api uffdio_api;
+ 
+     uffd_fd = syscall( __NR_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY );
+@@ -423,6 +424,10 @@ static void kernel_writewatch_init(void)
+         return;
+     }
+     use_kernel_writewatch = 1;
++#else
++	TRACE( "Kernel writewatches are not supported on Android\n" );
++    use_kernel_writewatch = 0;
++#endif    	    
+ }
+ 
+ static void kernel_writewatch_reset( void *start, SIZE_T len )

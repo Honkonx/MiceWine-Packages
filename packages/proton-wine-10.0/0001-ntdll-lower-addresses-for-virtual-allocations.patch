@@ -1,0 +1,59 @@
+From: MiceWine <micewine@localhost>
+Subject: ntdll: Lower Addresses for Virtual Allocations (Android)
+
+Puerto directo del mismo fix que KreitinnSoftware ya aplica en su propio fork
+de Wine vainilla (packages/wine-10.10 y packages/wine-9.20, ambos funcionan
+bien creando prefix), commit 4e954e9ef586b420ec59ffe75b66842443e06bff
+("ntdll: Lower Addresses for Virtual Allocations", PabloLabs36,
+referencia/wine-forks/kreitinnsoftware-wine-normal). El fork proton-wine que
+usa MiceWine (KreitinnSoftware/proton-wine, mismo autor/org) NUNCA recibio
+este mismo commit -- confirmado con `grep -n ANDROID dlls/ntdll/unix/virtual.c`
+(sin resultados) y revisando el log completo de
+referencia/wine-forks/proton-wine-full-history (176270 commits, ninguno
+menciona "Lower Addresses" ni toca estos valores).
+
+Causa raiz real, hallada 2026-08-26 comparando patches de
+referencia/wine-forks/pipetto-proton-9.0-x86_64 (fork independiente de
+Pipetto-crypto, SI trae un fix equivalente -- commit c9ee4e003238,
+"ntdll: Android address fix", guardado bajo #ifdef __ANDROID__) contra el
+proton-wine oficial de MiceWine: sin este fix, Wine reserva/permite
+asignaciones hasta el limite teorico completo de 47 bits
+(0x7fffffff0000) del espacio de direcciones win64 -- rango que Bionic/el
+kernel de Android en la practica no siempre puede mapear de forma fiable
+(TASK_SIZE real, ASLR, regiones ya reservadas por el propio proceso Android).
+Coincide exactamente con la firma de crash ya documentada en
+docs/investigacion/crash-wineboot-proton-wine-freetype.md: "Unhandled page
+fault on write access" justo despues de "Using native(wrapped)
+libfreetype.so", proceso Wine sin poder cargar kernel32.dll
+(status c0000135) -- un fallo de mapeo de memoria a direcciones altas
+encaja con esa firma mejor que una causa de freetype en si.
+
+Este paquete (proton-wine-10.0) es BLACKLIST_ARCH=aarch64 (solo x86_64), asi
+que no hace falta tocar loader/preloader.c (el guardado __aarch64__/
+__ANDROID__ de Pipetto en ese archivo es irrelevante aca) -- se replica
+exactamente el mismo cambio, sin condicional, que ya funciona en
+wine-10.10/wine-9.20 de este mismo proyecto.
+
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -293,9 +293,9 @@
+ static void *address_space_start = (void *)0x10000;
+ #endif
+ #ifdef _WIN64
+-static void *address_space_limit = (void *)0x7fffffff0000;  /* top of the total available address space */
+-static void *user_space_limit    = (void *)0x7fffffff0000;  /* top of the user address space */
+-static void *working_set_limit   = (void *)0x7fffffff0000;  /* top of the current working set */
++static void *address_space_limit = (void *)0x7fffff0000;  /* top of the total available address space */
++static void *user_space_limit    = (void *)0x7fffff0000;  /* top of the user address space */
++static void *working_set_limit   = (void *)0x7fffff0000;  /* top of the current working set */
+ #else
+ static void *address_space_limit = (void *)0xc0000000;
+ static void *user_space_limit    = (void *)0x7fff0000;
+@@ -935,7 +935,7 @@
+     reserve_area( (void *)0x000000010000, (void *)0x000068000000 );
+     reserve_area( (void *)0x00007f000000, (void *)0x00007fff0000 );
+-    reserve_area( (void *)0x7ffffe000000, (void *)0x7fffffff0000 );
++    reserve_area( (void *)0x7ffe000000, (void *)0x7fffff0000 );
+
+ #endif
+ }

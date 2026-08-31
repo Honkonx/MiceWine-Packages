@@ -1,0 +1,34 @@
+From: MiceWine <micewine@localhost>
+Subject: include: Fix __fastfail() inline asm for arm64ec target
+
+Bug real encontrado 2026-08-26 compilando este paquete con llvm-mingw
+(target arm64ec-windows): clang para arm64ec DEFINE __x86_64__ (correcto,
+es parte de como Microsoft especifica la ABI ARM64EC -- compatible en
+calling-convention con x64, aunque el codigo maquina real es AArch64), asi
+que la rama `#if defined(__x86_64__) || defined(__i386__)` de
+__fastfail() en include/winnt.h se activa igual para arm64ec e intenta
+ensamblar `int $0x29` (instruccion x86 real) con un constraint de registro
+x86 ("c" = ecx/rcx) -- clang rechaza esto en seco para un backend AArch64:
+"error: invalid input constraint 'c' in asm". Bloqueaba el build entero en
+dlls/acledit (primer .c que lo dispara, pero afecta a cualquier DLL que
+incluya windef.h).
+
+Fix: excluir arm64ec de la rama x86_64/i386 y usar la misma rama aarch64
+(brk #0xf003 con el codigo en x0) que ya existe mas abajo -- coincide con
+como Microsoft documenta el ABI real de __fastfail en ARM64EC (instruccion
+BRK, no INT), y es exactamente la misma rama que este archivo ya usa para
+aarch64 puro.
+
+--- a/include/winnt.h
++++ b/include/winnt.h
+@@ -7333,9 +7333,9 @@
+ static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
+ {
+-#if defined(__x86_64__) || defined(__i386__)
++#if (defined(__x86_64__) && !defined(__arm64ec__)) || defined(__i386__)
+     for (;;) __asm__ __volatile__( "int $0x29" :: "c" ((ULONG_PTR)code) : "memory" );
+-#elif defined(__aarch64__)
++#elif defined(__aarch64__) || defined(__arm64ec__)
+     register ULONG_PTR val __asm__("x0") = code;
+     for (;;) __asm__ __volatile__( "brk #0xf003" :: "r" (val) : "memory" );
+ #elif defined(__arm__)

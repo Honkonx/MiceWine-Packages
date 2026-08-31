@@ -34,7 +34,12 @@ if [ $# -lt 8 ]; then
 fi
 
 export INIT_DIR=$PWD
-export APP_ROOT_DIR=/data/data/com.micewine.emu/
+# No pisar un APP_ROOT_DIR ya heredado de build-all.sh (necesario para builds aislados
+# como mw-build-aarch64, que usan un APP_ROOT_DIR distinto de /data/data/com.micewine.emu
+# para no pisarse con un build x86_64 corriendo en paralelo) -- bug real encontrado
+# 2026-08-25: este hardcode pisaba el valor real y create-rat-pkg.sh nunca encontraba
+# el destdir-pkg correcto en esos builds aislados ("cd: ...: No such file or directory").
+export APP_ROOT_DIR="${APP_ROOT_DIR:-/data/data/com.micewine.emu/}"
 
 export PACKAGE_NAME=$1
 export PACKAGE_PRETTY_NAME=$2
@@ -53,7 +58,7 @@ fi
 export WORKDIR="$DESTDIR_PKG"
 
 if [ -d "$DESTDIR_PKG/data/" ]; then
-	WORKDIR="$DESTDIR_PKG/data/data/com.micewine.emu/"
+	WORKDIR="$DESTDIR_PKG$APP_ROOT_DIR/"
 fi
 
 cd $WORKDIR

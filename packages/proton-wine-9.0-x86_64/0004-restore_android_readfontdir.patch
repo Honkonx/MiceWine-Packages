@@ -1,0 +1,76 @@
+From: MiceWine <micewine@localhost>
+Subject: win32u: restore ReadFontDir Android fallback removed by upstream
+
+Pipetto-crypto borro este bloque en su commit 02723f95d0704b3630c489e381fef19f42f9ac22
+("remove some unused Android code paths", 2025-06-26) sobre dlls/win32u/freetype.c.
+Sin este fallback, freetype_load_fonts() queda como no-op puro en Android (nunca escanea
+/system/fonts), a diferencia de proton-wine-10.0 (KreitinnSoftware, funciona bien), que
+todavia tiene este mismo bloque intacto. Auditoria completa 2026-08-30
+(docs/investigacion/auditoria-completa-2026-08-30-pipetto-proton9.md): es la diferencia
+de codigo mas concreta entre la fuente que crashea (win32u/freetype, page fault +
+"could not load kernel32.dll") y la que no, en el mismo archivo implicado. No se pudo
+confirmar con backtrace real (winedbg no arranca en el dispositivo) que esto sea LA causa
+completa del crash -- se aplica como siguiente experimento de bajo riesgo, encima del fix
+ya confirmado de BOX64_EMULATED_LIBS=libfreetype.so (antes decia "libfreetype.so.6", que
+nunca podia matchear el nombre real del archivo).
+
+--- a/dlls/win32u/freetype.c
++++ b/dlls/win32u/freetype.c
+@@ -1457,6 +1457,49 @@ static INT freetype_add_mem_font( void *ptr, SIZE_T size, UINT flags )
+     return AddFontToList( NULL, NULL, ptr, size, flags );
+ }
+
++#ifdef __ANDROID__
++static BOOL ReadFontDir(const char *dirname, BOOL external_fonts)
++{
++    DIR *dir;
++    struct dirent *dent;
++    char path[MAX_PATH];
++
++    TRACE("Loading fonts from %s\n", debugstr_a(dirname));
++
++    dir = opendir(dirname);
++    if(!dir) {
++        WARN("Can't open directory %s\n", debugstr_a(dirname));
++	return FALSE;
++    }
++    while((dent = readdir(dir)) != NULL) {
++	struct stat statbuf;
++
++        if(!strcmp(dent->d_name, ".") || !strcmp(dent->d_name, ".."))
++	    continue;
++
++	TRACE("Found %s in %s\n", debugstr_a(dent->d_name), debugstr_a(dirname));
++
++	sprintf(path, "%s/%s", dirname, dent->d_name);
++
++	if(stat(path, &statbuf) == -1)
++	{
++	    WARN("Can't stat %s\n", debugstr_a(path));
++	    continue;
++	}
++	if(S_ISDIR(statbuf.st_mode))
++	    ReadFontDir(path, external_fonts);
++	else
++        {
++            DWORD addfont_flags = 0;
++            if(external_fonts) addfont_flags |= ADDFONT_EXTERNAL_FONT;
++            AddFontToList(NULL, path, NULL, 0, addfont_flags);
++        }
++    }
++    closedir(dir);
++    return TRUE;
++}
++#endif
++
+ #ifdef SONAME_LIBFONTCONFIG
+
+ static BOOL fontconfig_enabled;
+@@ -1867,6 +1910,8 @@ static void freetype_load_fonts(void)
+     load_fontconfig_fonts();
+ #elif defined(__APPLE__)
+     load_mac_fonts();
++#elif defined(__ANDROID__)
++    ReadFontDir("/system/fonts", TRUE);
+ #endif
+ }

@@ -1,0 +1,30 @@
+From c238a5fead7a807d644b469c681f7d67d95e9257 Mon Sep 17 00:00:00 2001
+From: PabloLabs36 <pablolabs36@gmail.com>
+Date: Fri, 27 Dec 2024 21:50:59 -0300
+Subject: [PATCH 02/18] ntdll: Create Disk D: as Android Internal Storage and
+ Z: as MiceWine's Home Dir on Android Builds
+
+---
+ dlls/ntdll/unix/server.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index b40e7c2a1d7..234d0777772 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1298,7 +1298,12 @@ static int setup_config_dir(void)
+     {
+         mkdir( "drive_c", 0777 );
+         symlink( "../drive_c", "dosdevices/c:" );
++#ifdef __ANDROID__
++        symlink( "/storage/emulated/0", "dosdevices/d:" );
++        symlink( "/data/data/com.micewine.emu/files", "dosdevices/z:" );
++#else
+         symlink( "/", "dosdevices/z:" );
++#endif
+     }
+     else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
+ 
+-- 
+2.55.0.windows.3
+

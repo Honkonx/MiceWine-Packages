@@ -1,0 +1,97 @@
+name: Build All Packages (manual)
+
+# Dispara build-all.sh completo (Wine/Proton, Box64, WOWBox64, y todos los demas
+# paquetes de packages/) para una arquitectura elegida a mano. DXVK/VKD3D-Proton NO se
+# construyen aca -- MiceWine-Packages los consume ya compilados de The412Banner/Nightlies
+# via tools/wcp-tzst-to-rat.sh (ver dxvk-vkd3d-convert.yml en esta misma carpeta),
+# confirmado en la auditoria 2026-08-30 (docs/investigacion/auditoria-completa-2026-08-30-dxvk-vkd3d-wined3d.md)
+# que ninguno de los dos pasa por build-all.sh.
+#
+# build-all.sh no soporta seleccionar un solo paquete (confirmado leyendo el script,
+# 2026-08-30) -- una corrida compila TODO lo que no este BLACKLIST_ARCH para la
+# arquitectura elegida. Si se necesita solo Wine/Box64/WOWBox64 puntual, usar el input
+# "solo_estos_paquetes" (mueve el resto fuera de packages/ antes de correr, y los
+# restaura despues -- mismo mecanismo manual ya usado varias veces en sesiones locales).
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Arquitectura a compilar"
+        required: true
+        type: choice
+        options:
+          - aarch64
+          - x86_64
+      solo_estos_paquetes:
+        description: >
+          Opcional: nombres de carpetas de packages/ separados por coma (ej.
+          "box64-0.4.5-1,WOWBox64-0.4.5-1,proton-wine-9.0-arm64ec") para compilar SOLO
+          esos -- el resto de packages/ se aparta temporalmente antes de correr y se
+          restaura al final. Vacio = compila todo (comportamiento normal del script).
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: build-all.sh ${{ inputs.arch }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar dependencias del build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git cmake make ninja-build meson python3 pkg-config \
+            curl wget unzip xz-utils zip p7zip-full file tar patch \
+            build-essential autoconf automake libtool gperf bison flex
+
+      - name: Apartar paquetes fuera del filtro (si se pidio "solo_estos_paquetes")
+        if: ${{ inputs.solo_estos_paquetes != '' }}
+        run: |
+          mkdir -p /tmp/apartados
+          KEEP="${{ inputs.solo_estos_paquetes }}"
+          IFS=',' read -ra KEEP_ARR <<< "$KEEP"
+          for dir in packages/*/; do
+            pkg="$(basename "$dir")"
+            keepit=0
+            for k in "${KEEP_ARR[@]}"; do
+              k_trim="$(echo "$k" | xargs)"
+              [ "$pkg" == "$k_trim" ] && keepit=1
+            done
+            if [ "$keepit" -eq 0 ]; then
+              mv "$dir" /tmp/apartados/
+            fi
+          done
+          echo "Paquetes que se van a compilar:"
+          ls packages/
+
+      - name: Cache de fuentes/NDK (cache/, evita re-descargar en cada corrida)
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: micewine-packages-cache-${{ inputs.arch }}-${{ hashFiles('packages/**/build.sh') }}
+          restore-keys: |
+            micewine-packages-cache-${{ inputs.arch }}-
+
+      - name: Compilar (build-all.sh)
+        run: |
+          chmod +x build-all.sh
+          ./build-all.sh ${{ inputs.arch }}
+
+      - name: Restaurar paquetes apartados (para que el próximo commit no los pierda)
+        if: ${{ inputs.solo_estos_paquetes != '' }}
+        run: |
+          if [ -d /tmp/apartados ]; then
+            for dir in /tmp/apartados/*/; do
+              [ -d "$dir" ] && mv "$dir" packages/
+            done
+          fi
+
+      - name: Subir .rat resultantes como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: micewine-packages-${{ inputs.arch }}
+          path: built-pkgs/*.rat
+          if-no-files-found: warn

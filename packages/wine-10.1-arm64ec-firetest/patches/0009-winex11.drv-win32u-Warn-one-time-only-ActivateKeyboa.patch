@@ -1,0 +1,46 @@
+From 44356d79e788068e8200c9a582a812fabe76865c Mon Sep 17 00:00:00 2001
+From: KreitinnSoftware <pablolabs36@gmail.com>
+Date: Fri, 7 Mar 2025 18:25:09 -0300
+Subject: [PATCH 09/18] winex11.drv, win32u: Warn one time only
+ ActivateKeyboardLayout (This is constantly flooding on log when running GTAV)
+
+---
+ dlls/win32u/input.c         | 3 ++-
+ dlls/winex11.drv/keyboard.c | 4 +++-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/win32u/input.c b/dlls/win32u/input.c
+index e403b0f041d..327d607b0d5 100644
+--- a/dlls/win32u/input.c
++++ b/dlls/win32u/input.c
+@@ -1317,10 +1317,11 @@ HKL WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags )
+     HKL old_layout;
+     LCID locale;
+     HWND focus;
++    static int warn_once;
+ 
+     TRACE_(keyboard)( "layout %p, flags %x\n", layout, flags );
+ 
+-    if (flags) FIXME_(keyboard)( "flags %x not supported\n", flags );
++    if (flags && !warn_once++) FIXME_(keyboard)( "flags %x not supported\n", flags );
+ 
+     if (layout == (HKL)HKL_NEXT || layout == (HKL)HKL_PREV)
+     {
+diff --git a/dlls/winex11.drv/keyboard.c b/dlls/winex11.drv/keyboard.c
+index 7b7371ed696..194d7b65b65 100644
+--- a/dlls/winex11.drv/keyboard.c
++++ b/dlls/winex11.drv/keyboard.c
+@@ -1808,7 +1808,9 @@ void X11DRV_InitKeyboard( Display *display )
+  */
+ BOOL X11DRV_ActivateKeyboardLayout(HKL hkl, UINT flags)
+ {
+-    FIXME("%p, %04x: semi-stub!\n", hkl, flags);
++    static int warn_once;
++
++    if (!warn_once++) FIXME("%p, %04x: semi-stub!\n", hkl, flags);
+ 
+     if (flags & KLF_SETFORPROCESS)
+     {
+-- 
+2.55.0.windows.3
+
