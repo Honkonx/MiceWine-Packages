@@ -183,6 +183,16 @@ setupPackage()
 	unset CFLAGS CPPFLAGS LDFLAGS LIBS OVERRIDE_PREFIX OVERRIDE_PKG_CONFIG_PATH
 	unset RUN_POST_APPLY_PATCH RUN_POST_BUILD RUN_POST_CONFIGURE
 	unset BLACKLIST_ARCH BUILD_IN_SRC VK_DRIVER_LIB
+	# Bug real corregido 2026-08-31: PREFIX_DIR recien se resetea a $PREFIX en la
+	# linea de mas abajo "export PREFIX_DIR=$PREFIX" (DESPUES de este source) --
+	# cualquier build.sh de paquete que use "$PREFIX_DIR" directo en su propio
+	# CFLAGS/LDFLAGS (ej. FreeGLUT: "LDFLAGS=-L$PREFIX_DIR/lib -lGL -landroid-shmem")
+	# se expande en el momento de este "source" con el valor VIEJO que dejo el
+	# paquete anterior (ej. proton-wine-9.0-arm64ec, que fija
+	# OVERRIDE_PREFIX=$PREFIX/../wine) -- confirmado con el error real de
+	# FreeGLUT: "ld.lld: error: unable to find library -lGL" buscando en
+	# ".../wine/lib" en vez de ".../usr/lib". Reseteado ACA, antes del source.
+	PREFIX_DIR="$PREFIX"
 
 	source "$INIT_DIR/packages/$package/build.sh"
 
