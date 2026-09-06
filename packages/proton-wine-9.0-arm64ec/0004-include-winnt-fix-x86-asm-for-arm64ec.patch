@@ -1,0 +1,73 @@
+From: MiceWine <micewine@localhost>
+Subject: include: Route remaining x86 inline asm away from arm64ec target
+
+Continuacion directa del patch 0003 (__fastfail). Misma causa raiz: clang para
+arm64ec DEFINE __x86_64__ (parte de la ABI ARM64EC de Microsoft), asi que TODAS
+las ramas de asm inline x86 en include/winnt.h gateadas solo por
+`defined(__x86_64__)` se activan para arm64ec e intentan ensamblar instrucciones
+x86 reales contra un backend AArch64.
+
+Errores reales que bloqueaban el build (2026-09-06, dlls/winecrt0):
+
+  ../include/winnt.h:7238:27: error: unrecognized instruction mnemonic
+   7238 | __asm__ __volatile__( "lock; xchgq %0,(%1)" ... );
+  <inline asm>:1:2: note: instantiated into assembly here
+      1 |     lock; xchgq x8,(x9)          <-- instruccion x86, registros ARM
+  make: *** [Makefile:150136: dlls/winecrt0/arm64ec-windows/debug.o] Error 1
+
+Nota sobre por que estas ramas se alcanzan con clang: las dos funciones
+Interlocked* prueban primero `#if (__GNUC__ > 4) || ((__GNUC__ == 4) &&
+(__GNUC_MINOR__ >= 7))` para usar __atomic_exchange_n. clang reporta
+__GNUC__=4/__GNUC_MINOR__=2, asi que esa condicion es falsa y cae en la rama x86.
+
+Se corrigen exactamente 3 bloques, los unicos que emiten instrucciones x86 reales:
+
+  7178  InterlockedExchange       "lock; xchgl"  -> cae al #else generico
+                                                    (__sync_bool_compare_and_swap)
+  7237  InterlockedExchangePointer "lock; xchgq" -> idem
+  7367  YieldProcessor            "rep; nop"     -> cae a la rama ARM existente
+                                                    ("dmb ishst; yield"), agregando
+                                                    __arm64ec__ a ese #elif
+
+NO se tocan los otros bloques con `defined(__x86_64__)` del archivo, a proposito:
+  - 7050 (__faststorefence), 7083/7090 (_ReadWriteBarrier): son #pragma intrinsic
+    de MSVC, no se compilan por el camino GNUC/clang.
+  - 7272 (__WINE_ATOMIC_*): su asm es la cadena VACIA (`__asm__ __volatile__( ""
+    ::: "memory" )`), una barrera de compilador valida en cualquier arquitectura,
+    no una instruccion x86.
+
+Este archivo ya usaba el idiom `&& !defined(__arm64ec__)` en la linea 7337 (rama
+de Pipetto), asi que se sigue exactamente esa convencion.
+
+--- a/include/winnt.h
++++ b/include/winnt.h
+@@ -7175,7 +7175,7 @@
+     LONG ret;
+ #if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 7))
+     ret = __atomic_exchange_n( dest, val, __ATOMIC_SEQ_CST );
+-#elif defined(__i386__) || defined(__x86_64__)
++#elif (defined(__i386__) || defined(__x86_64__)) && !defined(__arm64ec__)
+     __asm__ __volatile__( "lock; xchgl %0,(%1)"
+                           : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+ #else
+@@ -7234,7 +7234,7 @@
+     void *ret;
+ #if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 7))
+     ret = __atomic_exchange_n( dest, val, __ATOMIC_SEQ_CST );
+-#elif defined(__x86_64__)
++#elif defined(__x86_64__) && !defined(__arm64ec__)
+     __asm__ __volatile__( "lock; xchgq %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+ #elif defined(__i386__)
+     __asm__ __volatile__( "lock; xchgl %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+@@ -7364,9 +7364,9 @@
+ static FORCEINLINE void YieldProcessor(void)
+ {
+ #ifdef __GNUC__
+-#if defined(__i386__) || defined(__x86_64__)
++#if (defined(__i386__) || defined(__x86_64__)) && !defined(__arm64ec__)
+     __asm__ __volatile__( "rep; nop" : : : "memory" );
+-#elif defined(__arm__) || defined(__aarch64__)
++#elif defined(__arm__) || defined(__aarch64__) || defined(__arm64ec__)
+     __asm__ __volatile__( "dmb ishst\n\tyield" : : : "memory" );
+ #else
+     __asm__ __volatile__( "" : : : "memory" );
