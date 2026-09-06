@@ -83,6 +83,32 @@ OVERRIDE_PREFIX="$(realpath $PREFIX/../wine)"
 # --disable-<dll> es un mecanismo generico de Wine, no necesita AC_ARG_ENABLE
 # explicito por modulo).
 #
+# RUN_POST_APPLY_PATCH=./autogen.sh: el "configure" que Pipetto tiene commiteado en
+# esta rama NO corresponde a las tools del propio arbol -- es de un Wine mas nuevo.
+# Invoca makedep con una CLI que este tools/makedep.c no tiene:
+#
+#   Unknown option '-C'                      (primer sintoma)
+#   Unknown option '-i./confXXXX/makefile'   (el siguiente, tras sacar -C)
+#   config.status: error: could not create Makefile
+#
+# Su propio configure.ac SI es consistente con las tools (linea 2453:
+# makedep_flags vacio, y makedep.c soporta -R/-S/-fxxx). Parchear el configure
+# generado flag por flag es interminable, asi que se regenera entero desde
+# configure.ac con el autogen.sh oficial del arbol (que ademas corre make_requests,
+# make_vulkan y make_specfiles, manteniendo en sincro los fuentes generados).
+#
+# Evidencia de que este es el camino correcto: en una corrida previa donde autoreconf
+# si llego a ejecutarse, el configure regenerado paso sin problemas y el build avanzo
+# hasta un fallo posterior y distinto (wine-tools), no a este.
+#
+# Corre despues de aplicar los patches y ANTES de que build-all.sh elija la rama de
+# build (applyPatches -> RUN_POST_APPLY_PATCH linea ~122; seleccion de rama ~266).
+# Se pasa como UNA sola palabra a proposito: build-all.sh expande esta variable sin
+# comillas (`$RUN_POST_APPLY_PATCH`), asi que hace word-splitting pero no
+# re-interpreta comillas -- un comando con comillas internas (ej. un sed) llega mal
+# formado. Ese fue un intento fallido previo, documentado para no repetirlo.
+RUN_POST_APPLY_PATCH=./autogen.sh
+
 # --disable-wineandroid.drv: bug real corregido 2026-09-06. wineandroid.drv es el
 # driver grafico propio de Wine para Android, y su Makefile construye un APK con
 # gradle. En el WSL de build no hay gradle, asi que el target moria con:
