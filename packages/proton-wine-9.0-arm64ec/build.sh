@@ -106,7 +106,33 @@ GIT_COMMIT=b44ef85be4fbf48c186b7df823be6c59762009ec
 # Es seguro redirigir el `clang` pelado: el lado unix/Android usa el nombre CON prefijo
 # (`CC = aarch64-linux-android29-clang` en el Makefile generado), asi que no se ve afectado.
 # Por eso el shim incluye tambien clang/clang++ ademas de lld-link.
-RUN_POST_CONFIGURE="mkdir -p \$PWD/.lld-shim && for t in lld-link clang clang++; do ln -sf $INIT_DIR/cache/llvm-mingw/bin/\$t \$PWD/.lld-shim/\$t; done && export PATH=\$PWD/.lld-shim:\$PATH"
+#
+# Bloqueo real #12 (misma familia que #10/#11, pero causa distinta y verificada aparte):
+#
+#   lld-link: error: undefined symbol: __declspec(dllimport) getenv (EC symbol)
+#   >>> referenced by dlls/winecrt0/debug.c:220
+#   >>>               libwinecrt0.a(debug.o):(#fallback__wine_dbg_get_channel_flags)
+#   (idem __acrt_iob_func y fwrite)
+#   make: *** [Makefile:6471: dlls/authz/aarch64-windows/authz.dll] Error 2
+#
+# Causa real (verificada abriendo el archivo .a byte a byte, no supuesta): winebuild genera
+# la libreria de importacion de ucrtbase con `llvm-dlltool`, que escribe un archivo COFF con
+# el miembro especial "/<ECSYMBOLS>/" -- el mapa de simbolos del lado EC que lld necesita
+# para resolver `__imp_getenv` cuando enlaza codigo arm64ec. Pero acto seguido
+# output_static_lib(..., create=0) (tools/winebuild/import.c:1454) agrega los objetos extra
+# (crt_main.o, printf.o, ...) con `find_tool("ar")` -> `/usr/bin/ar`, el ar de binutils
+# x86_64-linux-gnu, que NO conoce ARM64EC: reescribe el archivo en formato GNU y reindexa
+# todo en el mapa `/` normal, dejando "/<ECSYMBOLS>/" como un miembro cualquiera. lld deja
+# entonces de ver el mapa EC y todos los `__imp_*` del lado EC quedan indefinidos.
+#
+# Verificado en aislamiento antes de aplicar el fix:
+#   - implib recien salida de llvm-dlltool (sin el paso `ar r`)  -> authz.dll enlaza OK
+#   - misma implib + `llvm-ar r <los mismos .o>`                 -> authz.dll enlaza OK
+#   - la que dejo el build con `/usr/bin/ar`                     -> undefined EC symbols
+# Por eso el shim mapea tambien `ar`->llvm-ar y `ranlib`->llvm-ranlib. Es seguro para el
+# lado unix/Android: llvm-ar/llvm-ranlib son drop-in para archivos ELF, y el Makefile
+# generado usa justamente los nombres pelados (`AR = ar`, `RANLIB = ranlib`).
+RUN_POST_CONFIGURE="mkdir -p \$PWD/.lld-shim && for t in lld-link clang clang++; do ln -sf $INIT_DIR/cache/llvm-mingw/bin/\$t \$PWD/.lld-shim/\$t; done && ln -sf $INIT_DIR/cache/llvm-mingw/bin/llvm-ar \$PWD/.lld-shim/ar && ln -sf $INIT_DIR/cache/llvm-mingw/bin/llvm-ranlib \$PWD/.lld-shim/ranlib && export PATH=\$PWD/.lld-shim:\$PATH"
 
 HOST_BUILD_CONFIGURE_ARGS="--enable-win64 --without-x"
 HOST_BUILD_FOLDER="$INIT_DIR/workdir/$package/wine-tools"
