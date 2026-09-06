@@ -90,7 +90,23 @@ GIT_COMMIT=b44ef85be4fbf48c186b7df823be6c59762009ec
 # symlink a lld-link de llvm-mingw. Asi cambia la resolucion de esa sola herramienta y no la
 # de clang/ar/as, que deben seguir viniendo del NDK para el lado unix/Android. No se toca el
 # PATH global de build-all.sh (afectaria a todos los paquetes, riesgo innecesario).
-RUN_POST_CONFIGURE="mkdir -p \$PWD/.lld-shim && ln -sf $INIT_DIR/cache/llvm-mingw/bin/lld-link \$PWD/.lld-shim/lld-link && export PATH=\$PWD/.lld-shim:\$PATH"
+# Bloqueo real #11 (misma familia que el #10), corregido en la misma ronda: tras resolver
+# lo anterior, el build moria enlazando las DLL hibridas con
+#
+#   clang-17: error: unknown argument: '-marm64x'
+#   winegcc: .../android-ndk/.../bin/clang failed
+#   make: *** [Makefile:6425: dlls/audioses/aarch64-windows/audioses.dll] Error 2
+#
+# "-marm64x" es la opcion de ENLACE que produce una imagen hibrida ARM64X ("Link as a
+# hybrid ARM64X image", confirmado en `clang --help` de llvm-mingw). El clang 17 del NDK no
+# la conoce. Configure SI detecto bien el compilador PE (el Makefile generado tiene
+# `aarch64_CC` y `arm64ec_CC` = clang de llvm-mingw), pero la regla de enlace invoca
+# `winegcc` SIN pasarle --cc-cmd, y winegcc cae a buscar `clang` pelado en el PATH -> NDK.
+#
+# Es seguro redirigir el `clang` pelado: el lado unix/Android usa el nombre CON prefijo
+# (`CC = aarch64-linux-android29-clang` en el Makefile generado), asi que no se ve afectado.
+# Por eso el shim incluye tambien clang/clang++ ademas de lld-link.
+RUN_POST_CONFIGURE="mkdir -p \$PWD/.lld-shim && for t in lld-link clang clang++; do ln -sf $INIT_DIR/cache/llvm-mingw/bin/\$t \$PWD/.lld-shim/\$t; done && export PATH=\$PWD/.lld-shim:\$PATH"
 
 HOST_BUILD_CONFIGURE_ARGS="--enable-win64 --without-x"
 HOST_BUILD_FOLDER="$INIT_DIR/workdir/$package/wine-tools"
