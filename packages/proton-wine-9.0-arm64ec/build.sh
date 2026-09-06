@@ -83,6 +83,26 @@ OVERRIDE_PREFIX="$(realpath $PREFIX/../wine)"
 # --disable-<dll> es un mecanismo generico de Wine, no necesita AC_ARG_ENABLE
 # explicito por modulo).
 #
+# --disable-wineandroid.drv: bug real corregido 2026-09-06. wineandroid.drv es el
+# driver grafico propio de Wine para Android, y su Makefile construye un APK con
+# gradle. En el WSL de build no hay gradle, asi que el target moria con:
+#
+#   /bin/sh: 1: gradle: not found
+#   make: *** [Makefile:1468: dlls/wineandroid.drv/wine-debug.apk] Error 127
+#
+# MiceWine NO usa ese driver -- usa winex11.drv contra el X server (Xlorie/XDisplay),
+# asi que el APK que Wine intenta construir nunca se usaria. Desactivarlo ademas
+# hace que configure verifique de verdad las libs de X y habilite winex11_drv
+# (configure ~17128: si wineandroid y winemac estan ambos en "no", exige X libs y
+# setea enable_winex11_drv), que es exactamente lo que queremos.
+#
+# Nota historica: los otros paquetes de Wine (wine-10.10, proton-wine-10.0, etc.)
+# NO tienen este flag y aun asi produjeron .rat validos -- porque antes del `set -e`
+# que se agrego hoy a build-all.sh, el fallo de este target no abortaba el script:
+# `make` fallaba, se seguia igual al `make install`, y se instalaba todo lo demas
+# que si habia compilado. Con set -e el fallo pasa a ser fatal, que es lo correcto,
+# pero obliga a desactivar explicitamente lo que antes fallaba en silencio.
+#
 # --with-mingw: RUTA EXPLICITA al clang de llvm-mingw, no "gcc" (bug real corregido
 # 2026-09-06). Con "--with-mingw=gcc" el configure de Wine NO fuerza un compilador
 # uniforme para las arquitecturas cruzadas -- solo lo hace si el valor es "clang" o
@@ -140,7 +160,8 @@ CONFIGURE_ARGS="--enable-archs=aarch64,arm64ec \
 				--without-udev \
 				--without-capi \
 				--without-piper \
-				--disable-amd_ags_x64"
+				--disable-amd_ags_x64 \
+				--disable-wineandroid.drv"
 
 # --without-gstreamer: NO es porque el codigo de Pipetto sea incompatible --
 # esta rama SI tiene commits activos de gstreamer (winegstreamer: make opengl
