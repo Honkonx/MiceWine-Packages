@@ -67,6 +67,31 @@ GIT_COMMIT=b44ef85be4fbf48c186b7df823be6c59762009ec
 # usa sys/shm.h en dlls/winex11.drv/bitblt.c (confirmado: ese include esta
 # guardeado por HAVE_X11_EXTENSIONS_XSHM_H, que nunca se define con --without-xshm).
 
+# Bloqueo real #10 corregido 2026-09-06: el build moria armando las librerias estaticas
+# hibridas de arm64ec con
+#
+#   libs/strmbase/aarch64-windows/dispatch.o: file machine type arm64 conflicts with
+#       library machine type arm64ec (from '/machine:arm64ec' flag)
+#   winebuild: .../android-ndk/.../bin/lld-link failed with status 1
+#
+# Causa real (verificada, no supuesta): para arm64ec Wine genera UNA sola libreria estatica
+# que contiene los objetos arm64 Y los arm64ec juntos (asi funciona el hibrido ARM64EC) --
+# ver la regla real del Makefile generado para libs/strmbase/aarch64-windows/libstrmbase.a,
+# que invoca "winebuild --staticlib -b arm64ec-windows <objs aarch64> <objs arm64ec>".
+# Mezclar ambas ABIs en un mismo archivo con /machine:arm64ec solo lo soporta un lld-link
+# moderno. winebuild resuelve esa herramienta en find_link_tool() (tools/winebuild/utils.c:258):
+# si no le pasan --cc-cmd, cae a find_binary(NULL,"lld-link"), o sea PATH -- y build-all.sh
+# pone el NDK ANTES que llvm-mingw (linea ~90), asi que ganaba el del NDK:
+#
+#   NDK:        LLD 17.0.2   <- demasiado viejo para archivos hibridos arm64+arm64ec
+#   llvm-mingw: LLD 22.1.8   <- el que corresponde (es el mismo toolchain PE de --with-mingw)
+#
+# Fix acotado a ESTE paquete: se antepone al PATH un directorio que contiene UNICAMENTE un
+# symlink a lld-link de llvm-mingw. Asi cambia la resolucion de esa sola herramienta y no la
+# de clang/ar/as, que deben seguir viniendo del NDK para el lado unix/Android. No se toca el
+# PATH global de build-all.sh (afectaria a todos los paquetes, riesgo innecesario).
+RUN_POST_CONFIGURE="mkdir -p \$PWD/.lld-shim && ln -sf $INIT_DIR/cache/llvm-mingw/bin/lld-link \$PWD/.lld-shim/lld-link && export PATH=\$PWD/.lld-shim:\$PATH"
+
 HOST_BUILD_CONFIGURE_ARGS="--enable-win64 --without-x"
 HOST_BUILD_FOLDER="$INIT_DIR/workdir/$package/wine-tools"
 HOST_BUILD_MAKE="make -j $(nproc) __tooldeps__ nls/all"
