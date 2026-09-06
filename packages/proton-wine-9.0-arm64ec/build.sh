@@ -83,6 +83,22 @@ OVERRIDE_PREFIX="$(realpath $PREFIX/../wine)"
 # --disable-<dll> es un mecanismo generico de Wine, no necesita AC_ARG_ENABLE
 # explicito por modulo).
 #
+# --with-mingw: RUTA EXPLICITA al clang de llvm-mingw, no "gcc" (bug real corregido
+# 2026-09-06). Con "--with-mingw=gcc" el configure de Wine NO fuerza un compilador
+# uniforme para las arquitecturas cruzadas -- solo lo hace si el valor es "clang" o
+# "*/clang" (configure linea ~10563: `case "x$with_mingw" in xclang|x*/clang) eval
+# "${wine_arch}_CC=\$with_mingw" ;;`). Sin eso, cada arch autodetecta por su cuenta y
+# los objetos de arm64ec-windows terminaban compilandose con el GCC x86_64 del sistema:
+#
+#   x86_64-w64-mingw32-gcc -c -o dlls/ntdll/arm64ec-windows/signal_x86_64.o ...
+#   /tmp/ccFZB8Uo.s:5159: Error: junk at end of line, first unrecognized character is ','
+#   make: *** [Makefile:110827: dlls/ntdll/arm64ec-windows/signal_x86_64.o] Error 1
+#
+# (GNU as no puede ensamblar lo que ese GCC emite para un target arm64ec). Se usa la
+# ruta absoluta y no "clang" pelado porque el PATH que arma build-all.sh pone el
+# sistema y cache/mingw/bin ANTES que cache/llvm-mingw/bin -- un "clang" sin ruta
+# resolveria al clang del sistema, que no tiene targets mingw/arm64ec.
+#
 # --enable-archs=aarch64,arm64ec: arm64ec es el modo WoW64 nativo de Wine (ARM
 # corriendo codigo x86_64 traducido) -- requiere TOOLCHAIN_TRIPLE apuntando al
 # target aarch64 del NDK (lo pone build-all.sh automaticamente segun el ARCH
@@ -102,7 +118,7 @@ CONFIGURE_ARGS="--enable-archs=aarch64,arm64ec \
 				--without-gstreamer \
 				--with-opengl \
 				--with-gnutls \
-				--with-mingw=gcc \
+				--with-mingw=$INIT_DIR/cache/llvm-mingw/bin/clang \
 				--with-xinput \
 				--with-xinput2 \
 				--enable-nls \
