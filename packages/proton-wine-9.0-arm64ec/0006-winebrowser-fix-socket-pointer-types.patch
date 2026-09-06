@@ -1,0 +1,36 @@
+From: MiceWine <micewine@localhost>
+Subject: winebrowser: Fix pointer types in Android socket calls
+
+Mismo problema exacto que el patch 0005 (dlls/user32/clipboard.c), pero en el otro
+lugar donde la rama proton-9.0-arm64ec de Pipetto habla por socket con el lado
+Android: programs/winebrowser/main.c pasa int* directo a send(), cuyo prototipo
+Winsock declara const char*.
+
+GCC lo aceptaba con warning; clang lo trata como ERROR
+(-Wincompatible-pointer-types), asi que con el toolchain PE cambiado a llvm-mingw
+(necesario para arm64ec, ver --with-mingw en build.sh) el build muere en:
+
+  ../programs/winebrowser/main.c:88:22: error: incompatible pointer types passing
+      'int *' to parameter of type 'const char *'
+  make: *** [Makefile:202367: programs/winebrowser/aarch64-windows/main.o] Error 1
+
+Fix: casts explicitos a const char*, igual que en 0005. No cambia una sola
+instruccion generada -- solo satisface el chequeo de tipos.
+
+--- a/programs/winebrowser/main.c
++++ b/programs/winebrowser/main.c
+@@ -85,12 +85,12 @@
+ 	}
+ 	int net_requestcode = htonl(message.request_code);
+ 	int net_data_length = htonl(strlen(message.data));
+-	ret = send(sock_fd, &net_requestcode, sizeof(net_requestcode), 0);
++	ret = send(sock_fd, (const char *)&net_requestcode, sizeof(net_requestcode), 0);
+ 	if (ret == SOCKET_ERROR) {
+ 		TRACE( "Failed to send request code to server\n" );
+ 		return 0;
+ 	}
+-	ret = send(sock_fd, &net_data_length, sizeof(net_data_length), 0);
++	ret = send(sock_fd, (const char *)&net_data_length, sizeof(net_data_length), 0);
+ 	if (ret == SOCKET_ERROR) {
+ 		TRACE( "Failed to send data length to server\n" );
+ 		return 0;
