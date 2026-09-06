@@ -228,10 +228,25 @@ RUN_POST_APPLY_PATCH=./autogen.sh
 # corriendo codigo x86_64 traducido) -- requiere TOOLCHAIN_TRIPLE apuntando al
 # target aarch64 del NDK (lo pone build-all.sh automaticamente segun el ARCH
 # de la corrida, gracias a BLACKLIST_ARCH=x86_64 de arriba).
+# Bloqueo real #13 (encontrado al inspeccionar el primer .rat completo, 2026-09-06): el
+# paquete salia con los binarios en `files/wine/arm64-v8a/bin/wine` en vez de
+# `files/wine/bin/wine`, distinto a TODOS los demas paquetes de Wine del proyecto
+# (proton-wine-10.0, wine-9.20, wine-9.20-aarch64, wine-10.10 -- verificado con tar -tf sobre
+# los .rat ya construidos). No es un bug del build: es la rama Android del configure de Wine,
+# pensada para el layout de un APK, que redefine exec_prefix cuando no se lo pasan:
+#
+#   configure:10285   aarch64) exec_prefix='${prefix}/arm64-v8a' ;;
+#
+# y bindir sale de ${exec_prefix}/bin. El proyecto ya habia chocado con esto antes: el paquete
+# descartado `wine-10.1-arm64ec-firetest` lo resolvia parcheando el configure
+# (patches/0003-configure-Disable-exec-prefix-and-always-use-winex11.patch). Aca se resuelve
+# sin patch, pasando --exec-prefix explicito: el `if test "x$exec_prefix" = xNONE` deja de
+# dispararse y bindir vuelve a ser $PREFIX/bin, igual que el resto de los paquetes.
 CONFIGURE_ARGS="--enable-archs=aarch64,arm64ec \
 				--host=$TOOLCHAIN_TRIPLE \
 				--with-wine-tools=$INIT_DIR/workdir/$package/wine-tools \
 				--prefix=$OVERRIDE_PREFIX \
+				--exec-prefix=$OVERRIDE_PREFIX \
 				--without-oss \
 				--disable-winemenubuilder \
 				--disable-win16 \
