@@ -115,24 +115,36 @@ GIT_COMMIT=b44ef85be4fbf48c186b7df823be6c59762009ec
 #   (idem __acrt_iob_func y fwrite)
 #   make: *** [Makefile:6471: dlls/authz/aarch64-windows/authz.dll] Error 2
 #
-# Causa real (verificada abriendo el archivo .a byte a byte, no supuesta): winebuild genera
-# la libreria de importacion de ucrtbase con `llvm-dlltool`, que escribe un archivo COFF con
-# el miembro especial "/<ECSYMBOLS>/" -- el mapa de simbolos del lado EC que lld necesita
-# para resolver `__imp_getenv` cuando enlaza codigo arm64ec. Pero acto seguido
-# output_static_lib(..., create=0) (tools/winebuild/import.c:1454) agrega los objetos extra
-# (crt_main.o, printf.o, ...) con `find_tool("ar")` -> `/usr/bin/ar`, el ar de binutils
-# x86_64-linux-gnu, que NO conoce ARM64EC: reescribe el archivo en formato GNU y reindexa
-# todo en el mapa `/` normal, dejando "/<ECSYMBOLS>/" como un miembro cualquiera. lld deja
-# entonces de ver el mapa EC y todos los `__imp_*` del lado EC quedan indefinidos.
+# Causa real (verificada abriendo el archivo .a byte a byte, no supuesta): una libreria de
+# importacion ARM64EC lleva DOS mapas de simbolos -- el "/" de siempre y un miembro especial
+# "/<ECSYMBOLS>/" con los simbolos del lado EC. lld resuelve `__imp_getenv` para codigo
+# arm64ec SOLO mirando ese segundo mapa. winebuild genera la implib con llvm-dlltool (bien:
+# escribe los dos mapas) y despues le agrega los objetos extra (crt_main.o, printf.o, ...)
+# con output_static_lib(..., create=0) -> find_tool("ar") -- tools/winebuild/import.c:1454.
 #
-# Verificado en aislamiento antes de aplicar el fix:
+# find_tool() (tools/winebuild/utils.c:228) NO usa el `ar` pelado: prueba primero
+# find_binary(target_alias,"ar") (o sea "arm64ec-windows-ar", que no existe) y CAE en
+# find_binary("llvm","ar"), que busca `llvm-ar` en el PATH -- donde gana el del NDK:
+#
+#   NDK:        llvm-ar 17.0.2   <- no conoce ARM64EC, degrada "/<ECSYMBOLS>/" a miembro normal
+#   llvm-mingw: llvm-ar 22.1.8   <- el que corresponde
+#
+# Confirmado ejecutando el mismo winebuild con el PATH exacto del build (sin shim): elige
+# .../android-ndk/.../bin/llvm-ar y el .a resultante lista "/<ECSYMBOLS>/" como miembro
+# comun. Por eso NO alcanza con mapear `ar`: hay que mapear tambien `llvm-ar`/`llvm-ranlib`.
+#
+# Verificado en aislamiento antes de aplicar el fix (enlace real de authz.dll, a mano):
 #   - implib recien salida de llvm-dlltool (sin el paso `ar r`)  -> authz.dll enlaza OK
-#   - misma implib + `llvm-ar r <los mismos .o>`                 -> authz.dll enlaza OK
-#   - la que dejo el build con `/usr/bin/ar`                     -> undefined EC symbols
-# Por eso el shim mapea tambien `ar`->llvm-ar y `ranlib`->llvm-ranlib. Es seguro para el
-# lado unix/Android: llvm-ar/llvm-ranlib son drop-in para archivos ELF, y el Makefile
-# generado usa justamente los nombres pelados (`AR = ar`, `RANLIB = ranlib`).
-RUN_POST_CONFIGURE="mkdir -p \$PWD/.lld-shim && for t in lld-link clang clang++; do ln -sf $INIT_DIR/cache/llvm-mingw/bin/\$t \$PWD/.lld-shim/\$t; done && ln -sf $INIT_DIR/cache/llvm-mingw/bin/llvm-ar \$PWD/.lld-shim/ar && ln -sf $INIT_DIR/cache/llvm-mingw/bin/llvm-ranlib \$PWD/.lld-shim/ranlib && export PATH=\$PWD/.lld-shim:\$PATH"
+#   - misma implib + `llvm-ar` 22 con los mismos .o              -> authz.dll enlaza OK
+#   - la que dejo el build con el llvm-ar 17 del NDK             -> undefined EC symbols
+#
+# Es seguro para el lado unix/Android: llvm-ar/llvm-ranlib son drop-in para archivos ELF, y
+# el Makefile generado usa los nombres pelados (`AR = ar`, `RANLIB = ranlib`).
+#
+# Al aplicar este fix hay que BORRAR las import libs ya generadas (los .a bajo
+# *aarch64-windows*/*arm64ec-windows*): make no las reconstruye solo porque sus dependencias
+# no cambiaron. Los .o se conservan, asi que regenerarlas es barato.
+RUN_POST_CONFIGURE="mkdir -p \$PWD/.lld-shim && for t in lld-link clang clang++ llvm-ar llvm-ranlib llvm-dlltool; do ln -sf $INIT_DIR/cache/llvm-mingw/bin/\$t \$PWD/.lld-shim/\$t; done && ln -sf $INIT_DIR/cache/llvm-mingw/bin/llvm-ar \$PWD/.lld-shim/ar && ln -sf $INIT_DIR/cache/llvm-mingw/bin/llvm-ranlib \$PWD/.lld-shim/ranlib && export PATH=\$PWD/.lld-shim:\$PATH"
 
 HOST_BUILD_CONFIGURE_ARGS="--enable-win64 --without-x"
 HOST_BUILD_FOLDER="$INIT_DIR/workdir/$package/wine-tools"
