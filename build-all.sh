@@ -240,7 +240,17 @@ setupPackage()
 
 	export PREFIX_DIR=$PREFIX
 
-	echo "export CFLAGS=\"$CFLAGS\" LIBS=\"$LIBS\" CPPFLAGS=\"$CPPFLAGS\" LDFLAGS=\"-Wl,-rpath="$PREFIX_DIR/lib" $LDFLAGS\"" > build.sh
+	# Bug real corregido 2026-09-06: sin "set -e" este script generado corria TODOS sus pasos
+	# aunque uno fallara, y su ultima linea ("echo $? > exit_code") capturaba solo el exit del
+	# ULTIMO comando (post-install.sh, que suele funcionar igual) -- build.sh siempre salia 0.
+	# El unico guard adicional de build-all.sh (`[ ! -d "$packageDestDirPkg$APP_ROOT_DIR" ]`)
+	# solo verifica que el directorio exista, y post-install.sh lo crea igual. Resultado real:
+	# proton-wine-9.0-arm64ec se empaqueto como un .rat de 136MB con SOLO gecko/mono y cero
+	# binarios de Wine, sin ningun aviso (su configure habia fallado con "could not find Wine
+	# tools"). Con set -e cualquier paso que falle aborta y propaga el error a build-all.sh,
+	# que ya sabe reportarlo ("failed to compile. Check logs").
+	echo "set -e" > build.sh
+	echo "export CFLAGS=\"$CFLAGS\" LIBS=\"$LIBS\" CPPFLAGS=\"$CPPFLAGS\" LDFLAGS=\"-Wl,-rpath="$PREFIX_DIR/lib" $LDFLAGS\"" >> build.sh
 	echo "export DESTDIR=\"$INIT_DIR/workdir/$package/destdir-pkg\"" >> build.sh
 
 	if [ -n "$OVERRIDE_PREFIX" ]; then
@@ -280,6 +290,25 @@ setupPackage()
 		echo "cd .." >> build.sh
 		echo "./autogen.sh" >> build.sh
 		echo "cd build_dir" >> build.sh
+
+		# Bug real corregido 2026-09-06: este bloque HOST_BUILD_* existia SOLO en la rama
+		# `if [ -f "configure" ]` de arriba. En un clon fresco de Wine el archivo `configure`
+		# todavia no existe (lo genera autogen.sh), asi que TODO paquete Wine cae en esta rama
+		# en su PRIMERA corrida -- y aca se ignoraban HOST_BUILD_CONFIGURE_ARGS/FOLDER/MAKE,
+		# por lo que wine-tools nunca se construia y el configure cruzado moria con
+		# "could not find Wine tools in .../wine-tools" (confirmado en el config.log real de
+		# proton-wine-9.0-arm64ec). En la SEGUNDA corrida `configure` ya existia y tomaba la
+		# otra rama, que si construye las tools -- de ahi el patron real observado: "el primer
+		# intento falla, el segundo funciona". Combinado con el `set -e` faltante (ver arriba),
+		# ese primer fallo se empaquetaba como un .rat vacio sin avisar.
+		if [ -n "$HOST_BUILD_CONFIGURE_ARGS" ]; then
+			echo "mkdir -p $HOST_BUILD_FOLDER" >> build.sh
+			echo "cd $HOST_BUILD_FOLDER" >> build.sh
+			echo "env -i bash -l -c \"../configure $HOST_BUILD_CONFIGURE_ARGS\"" >> build.sh
+			echo "$HOST_BUILD_MAKE" >> build.sh
+			echo 'cd $OLDPWD' >> build.sh
+		fi
+
 		echo "../configure --libdir=$PREFIX_DIR/lib --prefix=$PREFIX_DIR $CONFIGURE_ARGS" >> build.sh
 		echo "$RUN_POST_CONFIGURE" >> build.sh
 

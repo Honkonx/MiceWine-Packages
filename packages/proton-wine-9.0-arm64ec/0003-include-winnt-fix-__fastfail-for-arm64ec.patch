@@ -1,0 +1,45 @@
+From: MiceWine <micewine@localhost>
+Subject: include: Fix __fastfail() inline asm for arm64ec target
+
+Bug real de upstream, encontrado 2026-09-06 compilando proton-wine-9.0-arm64ec
+(target arm64ec-windows). Es exactamente el mismo bug que ya habia bloqueado a
+wine-10.1-arm64ec-firetest (ver packages-descartados-2026-08-31/, patch 0018) --
+se reproduce identico sobre la base de Wine 9.0 de Pipetto.
+
+Causa: clang para arm64ec DEFINE __x86_64__ (correcto, es parte de como Microsoft
+especifica la ABI ARM64EC -- compatible en calling-convention con x64, aunque el
+codigo maquina real es AArch64), asi que la rama `#if defined(__x86_64__) ||
+defined(__i386__)` de __fastfail() en include/winnt.h se activa igual para arm64ec
+e intenta ensamblar `int $0x29` (instruccion x86 real) con un constraint de
+registro x86 ("c" = ecx/rcx). clang lo rechaza en seco para un backend AArch64:
+
+  ../include/winnt.h:7312:51: error: invalid input constraint 'c' in asm
+  make: *** [Makefile:1488: dlls/acledit/arm64ec-windows/main.o] Error 1
+
+Bloquea el build entero en dlls/acledit (primer .c que lo dispara, pero afecta a
+cualquier DLL que incluya windef.h).
+
+Fix: excluir arm64ec de la rama x86_64/i386 y usar la misma rama aarch64
+(brk #0xf003 con el codigo en x0) que ya existe mas abajo en este mismo archivo --
+coincide con como Microsoft documenta el ABI real de __fastfail en ARM64EC
+(instruccion BRK, no INT).
+
+Acotado a __fastfail() a proposito: un sed mas amplio sobre `defined(__aarch64__)`
+tocaba tambien DISPATCHER_CONTEXT (linea ~2176), __dmb (~7092) y los
+__WINE_ATOMIC_* (~7269), que son cambios de comportamiento fuera del alcance de
+este bug y sin evidencia de que hagan falta.
+
+--- a/include/winnt.h
++++ b/include/winnt.h
+@@ -7308,9 +7308,9 @@
+ 
+ static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
+ {
+-#if defined(__x86_64__) || defined(__i386__)
++#if (defined(__x86_64__) && !defined(__arm64ec__)) || defined(__i386__)
+     for (;;) __asm__ __volatile__( "int $0x29" :: "c" ((ULONG_PTR)code) : "memory" );
+-#elif defined(__aarch64__)
++#elif defined(__aarch64__) || defined(__arm64ec__)
+     register ULONG_PTR val __asm__("x0") = code;
+     for (;;) __asm__ __volatile__( "brk #0xf003" :: "r" (val) : "memory" );
+ #elif defined(__arm__)
